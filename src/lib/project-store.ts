@@ -1,5 +1,6 @@
 import { load } from "@tauri-apps/plugin-store"
 import type { WikiProject } from "@/types/wiki"
+import type { LlmConfig } from "@/stores/wiki-store"
 
 const STORE_NAME = "app-state.json"
 const RECENT_PROJECTS_KEY = "recentProjects"
@@ -35,6 +36,18 @@ export async function addToRecentProjects(
   const filtered = existing.filter((p) => p.path !== project.path)
   const updated = [project, ...filtered].slice(0, 10)
   await store.set(RECENT_PROJECTS_KEY, updated)
+}
+
+const LLM_CONFIG_KEY = "llmConfig"
+
+export async function saveLlmConfig(config: LlmConfig): Promise<void> {
+  const store = await getStore()
+  await store.set(LLM_CONFIG_KEY, config)
+}
+
+export async function loadLlmConfig(): Promise<LlmConfig | null> {
+  const store = await getStore()
+  return (await store.get<LlmConfig>(LLM_CONFIG_KEY)) ?? null
 }
 
 export async function removeFromRecentProjects(

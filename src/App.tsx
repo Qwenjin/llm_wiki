@@ -2,7 +2,7 @@ import { useState, useEffect } from "react"
 import { open } from "@tauri-apps/plugin-dialog"
 import { useWikiStore } from "@/stores/wiki-store"
 import { listDirectory, openProject } from "@/commands/fs"
-import { getLastProject, saveLastProject } from "@/lib/project-store"
+import { getLastProject, saveLastProject, loadLlmConfig } from "@/lib/project-store"
 import { AppLayout } from "@/components/layout/app-layout"
 import { WelcomeScreen } from "@/components/project/welcome-screen"
 import { CreateProjectDialog } from "@/components/project/create-project-dialog"
@@ -19,19 +19,28 @@ function App() {
 
   // Auto-open last project on startup
   useEffect(() => {
-    getLastProject()
-      .then(async (lastProject) => {
+    async function init() {
+      try {
+        const savedConfig = await loadLlmConfig()
+        if (savedConfig) {
+          useWikiStore.getState().setLlmConfig(savedConfig)
+        }
+        const lastProject = await getLastProject()
         if (lastProject) {
           try {
             const proj = await openProject(lastProject.path)
             await handleProjectOpened(proj)
           } catch {
-            // Last project no longer valid, show welcome screen
+            // Last project no longer valid
           }
         }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
+      } catch {
+        // ignore init errors
+      } finally {
+        setLoading(false)
+      }
+    }
+    init()
   }, [])
 
   async function handleProjectOpened(proj: WikiProject) {

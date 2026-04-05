@@ -33,8 +33,11 @@ export function SettingsView() {
 
   const currentProvider = PROVIDERS.find((p) => p.value === provider)
 
-  function handleSave() {
-    setLlmConfig({ provider, apiKey, model, ollamaUrl, customEndpoint })
+  async function handleSave() {
+    const { saveLlmConfig } = await import("@/lib/project-store")
+    const newConfig = { provider, apiKey, model, ollamaUrl, customEndpoint }
+    setLlmConfig(newConfig)
+    await saveLlmConfig(newConfig)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
