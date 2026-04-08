@@ -9,6 +9,7 @@ import { streamChat, type ChatMessage as LLMMessage } from "@/lib/llm-client"
 import { executeIngestWrites } from "@/lib/ingest"
 import { listDirectory, readFile, writeFile } from "@/commands/fs"
 import { searchWiki } from "@/lib/search"
+import { buildRetrievalGraph, getRelatedNodes } from "@/lib/graph-relevance"
 import { useReviewStore } from "@/stores/review-store"
 import type { FileNode } from "@/types/wiki"
 
@@ -47,41 +48,90 @@ export function ChatPanel() {
       addMessage("user", text)
       setStreaming(true)
 
-      // Build system prompt with wiki context: search for relevant pages and include their content
+      // Build system prompt with wiki context using graph-enhanced retrieval
       const systemMessages: LLMMessage[] = []
       if (project) {
+        const dataVersion = useWikiStore.getState().dataVersion
         const [index, purpose] = await Promise.all([
           readFile(`${project.path}/wiki/index.md`).catch(() => ""),
           readFile(`${project.path}/purpose.md`).catch(() => ""),
         ])
 
-        // Search wiki + raw sources for pages relevant to the current question only
+        // --- Phase 1: Tokenized search -> top 10 ---
         const searchResults = await searchWiki(project.path, text)
+        const topSearchResults = searchResults.slice(0, 10)
 
-        // Read the full content of top relevant pages (max 5 to keep context focused)
-        const relevantPages: { title: string; path: string; content: string }[] = []
-        for (const result of searchResults.slice(0, 5)) {
+        // --- Phase 2: Graph 1-level expansion ---
+        const graph = await buildRetrievalGraph(project.path, dataVersion)
+        const expandedIds = new Set<string>()
+        const searchHitPaths = new Set(topSearchResults.map((r) => r.path))
+        const graphExpansions: { title: string; path: string; relevance: number }[] = []
+
+        for (const result of topSearchResults) {
+          // Derive node ID from file path (kebab-case filename without .md)
+          const fileName = result.path.split("/").pop() ?? ""
+          const nodeId = fileName.replace(/\.md$/, "")
+          const related = getRelatedNodes(nodeId, graph, 3)
+          for (const { node, relevance } of related) {
+            if (relevance < 2.0) continue
+            if (searchHitPaths.has(node.path)) continue
+            if (expandedIds.has(node.id)) continue
+            expandedIds.add(node.id)
+            graphExpansions.push({
+              title: node.title,
+              path: node.path,
+              relevance,
+            })
+          }
+        }
+        // Sort graph expansions by relevance descending
+        graphExpansions.sort((a, b) => b.relevance - a.relevance)
+
+        // --- Phase 3 & 4: Budget control with priority queue ---
+        const TOTAL_BUDGET = 30_000
+        const MAX_PAGE_SIZE = 8_000
+        let usedChars = 0
+
+        type PageEntry = { title: string; path: string; content: string; priority: number }
+        const relevantPages: PageEntry[] = []
+
+        // Helper to add a page within budget
+        const tryAddPage = async (
+          title: string,
+          filePath: string,
+          priority: number,
+        ): Promise<boolean> => {
+          if (usedChars >= TOTAL_BUDGET) return false
           try {
-            const content = await readFile(result.path)
-            const relativePath = result.path.replace(project.path + "/", "")
-            // Truncate large files
-            const truncated = content.length > 15000
-              ? content.slice(0, 15000) + "\n\n[...truncated...]"
-              : content
-            relevantPages.push({ title: result.title, path: relativePath, content: truncated })
+            const raw = await readFile(filePath)
+            const relativePath = filePath.replace(project.path + "/", "")
+            const truncated = raw.length > MAX_PAGE_SIZE
+              ? raw.slice(0, MAX_PAGE_SIZE) + "\n\n[...truncated...]"
+              : raw
+            if (usedChars + truncated.length > TOTAL_BUDGET) return false
+            usedChars += truncated.length
+            relevantPages.push({ title, path: relativePath, content: truncated, priority })
+            return true
           } catch {
-            // skip unreadable pages
+            return false
           }
         }
 
-        // If search found nothing (new wiki or very specific question), read index + overview only
+        // P0: Title matches from search
+        for (const r of topSearchResults.filter((r) => r.titleMatch)) {
+          await tryAddPage(r.title, r.path, 0)
+        }
+        // P1: Content matches from search
+        for (const r of topSearchResults.filter((r) => !r.titleMatch)) {
+          await tryAddPage(r.title, r.path, 1)
+        }
+        // P2: Graph expansions (already sorted by relevance)
+        for (const exp of graphExpansions) {
+          await tryAddPage(exp.title, exp.path, 2)
+        }
+        // P3: Overview fallback if nothing found
         if (relevantPages.length === 0) {
-          try {
-            const overview = await readFile(`${project.path}/wiki/overview.md`)
-            relevantPages.push({ title: "Overview", path: "wiki/overview.md", content: overview })
-          } catch {
-            // no overview
-          }
+          await tryAddPage("Overview", `${project.path}/wiki/overview.md`, 3)
         }
 
         // Build numbered wiki context so AI can cite by number

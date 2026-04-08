@@ -6,10 +6,37 @@ export interface SearchResult {
   title: string
   snippet: string
   titleMatch: boolean
+  score: number
 }
 
 const MAX_RESULTS = 20
 const SNIPPET_CONTEXT = 80
+const TITLE_MATCH_BONUS = 10
+
+const STOP_WORDS = new Set([
+  "的", "是", "了", "什么", "在", "有", "和", "与", "对", "从",
+  "the", "is", "a", "an", "what", "how", "are", "was", "were",
+  "do", "does", "did", "be", "been", "being", "have", "has", "had",
+  "it", "its", "in", "on", "at", "to", "for", "of", "with", "by",
+  "this", "that", "these", "those",
+])
+
+export function tokenizeQuery(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/[\s,，。！？、；：""''（）()\-_/\\]+/)
+    .filter((t) => t.length > 1)
+    .filter((t) => !STOP_WORDS.has(t))
+}
+
+function tokenMatchScore(text: string, tokens: readonly string[]): number {
+  const lower = text.toLowerCase()
+  let score = 0
+  for (const token of tokens) {
+    if (lower.includes(token)) score += 1
+  }
+  return score
+}
 
 function flattenMdFiles(nodes: FileNode[]): FileNode[] {
   const files: FileNode[] = []
@@ -56,15 +83,16 @@ export async function searchWiki(
 ): Promise<SearchResult[]> {
   if (!query.trim()) return []
 
-  const lowerQuery = query.toLowerCase()
-  const titleMatches: SearchResult[] = []
-  const contentMatches: SearchResult[] = []
+  const tokens = tokenizeQuery(query)
+  // Fallback: if all tokens were filtered out, use the trimmed query as a single token
+  const effectiveTokens = tokens.length > 0 ? tokens : [query.trim().toLowerCase()]
+  const results: SearchResult[] = []
 
   // Search wiki pages
   try {
     const wikiTree = await listDirectory(`${projectPath}/wiki`)
     const wikiFiles = flattenMdFiles(wikiTree)
-    await searchFiles(wikiFiles, lowerQuery, query, titleMatches, contentMatches)
+    await searchFiles(wikiFiles, effectiveTokens, query, results)
   } catch {
     // no wiki directory
   }
@@ -73,20 +101,21 @@ export async function searchWiki(
   try {
     const rawTree = await listDirectory(`${projectPath}/raw/sources`)
     const rawFiles = flattenAllFiles(rawTree)
-    await searchFiles(rawFiles, lowerQuery, query, titleMatches, contentMatches)
+    await searchFiles(rawFiles, effectiveTokens, query, results)
   } catch {
     // no raw sources
   }
 
-  return [...titleMatches, ...contentMatches].slice(0, MAX_RESULTS)
+  // Sort by score descending
+  results.sort((a, b) => b.score - a.score)
+  return results.slice(0, MAX_RESULTS)
 }
 
 async function searchFiles(
   files: FileNode[],
-  lowerQuery: string,
+  tokens: readonly string[],
   query: string,
-  titleMatches: SearchResult[],
-  contentMatches: SearchResult[],
+  results: SearchResult[],
 ): Promise<void> {
   for (const file of files) {
     let content = ""
@@ -97,29 +126,28 @@ async function searchFiles(
     }
 
     const title = extractTitle(content, file.name)
-    const titleLower = title.toLowerCase()
-    const fileNameLower = file.name.toLowerCase()
-    const contentLower = content.toLowerCase()
+    const titleText = `${title} ${file.name}`
 
-    const matchesTitle =
-      titleLower.includes(lowerQuery) || fileNameLower.includes(lowerQuery)
-    const matchesContent = contentLower.includes(lowerQuery)
+    const titleScore = tokenMatchScore(titleText, tokens)
+    const contentScore = tokenMatchScore(content, tokens)
 
-    if (!matchesTitle && !matchesContent) continue
+    if (titleScore === 0 && contentScore === 0) continue
 
-    const snippet = buildSnippet(content, query)
-    const result: SearchResult = {
+    const isTitleMatch = titleScore > 0
+    const score = contentScore + (isTitleMatch ? TITLE_MATCH_BONUS : 0)
+
+    const firstMatchingToken = tokens.find((t) =>
+      content.toLowerCase().includes(t),
+    ) ?? query
+    const snippet = buildSnippet(content, firstMatchingToken)
+
+    results.push({
       path: file.path,
       title,
       snippet,
-      titleMatch: matchesTitle,
-    }
-
-    if (matchesTitle) {
-      titleMatches.push(result)
-    } else {
-      contentMatches.push(result)
-    }
+      titleMatch: isTitleMatch,
+      score,
+    })
   }
 }
 
