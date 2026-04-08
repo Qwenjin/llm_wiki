@@ -4,6 +4,7 @@ use tiny_http::{Header, Method, Response, Server};
 
 static CURRENT_PROJECT: Mutex<String> = Mutex::new(String::new());
 static ALL_PROJECTS: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new()); // (name, path)
+static PENDING_CLIPS: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new()); // (projectPath, filePath)
 
 pub fn start_clip_server() {
     thread::spawn(|| {
@@ -112,6 +113,18 @@ pub fn start_clip_server() {
                         }
                     }
                     let mut response = Response::from_string(r#"{"ok":true}"#);
+                    for h in &cors_headers { response.add_header(h.clone()); }
+                    let _ = request.respond(response);
+                }
+                (&Method::Get, "/clips/pending") => {
+                    let mut pending = PENDING_CLIPS.lock().unwrap();
+                    let items: Vec<String> = pending.iter()
+                        .map(|(proj, file)| format!(r#"{{"projectPath":"{}","filePath":"{}"}}"#,
+                            proj.replace('"', r#"\""#), file.replace('"', r#"\""#)))
+                        .collect();
+                    let body = format!(r#"{{"ok":true,"clips":[{}]}}"#, items.join(","));
+                    pending.clear();
+                    let mut response = Response::from_string(body);
                     for h in &cors_headers { response.add_header(h.clone()); }
                     let _ = request.respond(response);
                 }
@@ -246,13 +259,14 @@ fn handle_clip(body: &str) -> String {
         counter += 1;
     }
 
-    // Build markdown content
+    // Build markdown content with web-clip origin
     let markdown = format!(
-        "---\ntype: clip\ntitle: \"{}\"\nurl: \"{}\"\nclipped: {}\nsources: []\ntags: [web-clip]\n---\n\n# {}\n\n{}\n",
+        "---\ntype: clip\ntitle: \"{}\"\nurl: \"{}\"\nclipped: {}\norigin: web-clip\nsources: []\ntags: [web-clip]\n---\n\n# {}\n\nSource: {}\n\n{}\n",
         title.replace('"', r#"\""#),
         url.replace('"', r#"\""#),
         date,
         title,
+        url,
         content,
     );
 
@@ -264,5 +278,11 @@ fn handle_clip(body: &str) -> String {
     }
 
     let relative_path = file_path.replace(&format!("{}/", project_path), "");
+
+    // Add to pending clips for frontend to pick up and auto-ingest
+    if let Ok(mut pending) = PENDING_CLIPS.lock() {
+        pending.push((project_path, file_path.clone()));
+    }
+
     format!(r#"{{"ok":true,"path":"{}"}}"#, relative_path)
 }

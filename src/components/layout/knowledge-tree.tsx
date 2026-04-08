@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import {
-  FileText, Users, Lightbulb, BookOpen, HelpCircle, GitMerge, BarChart3, ChevronRight, ChevronDown, Layout,
+  FileText, Users, Lightbulb, BookOpen, HelpCircle, GitMerge, BarChart3, ChevronRight, ChevronDown, Layout, Globe,
 } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -12,6 +12,7 @@ interface WikiPageInfo {
   title: string
   type: string
   tags: string[]
+  origin?: string
 }
 
 const TYPE_CONFIG: Record<string, { icon: typeof FileText; label: string; color: string; order: number }> = {
@@ -150,6 +151,7 @@ export function KnowledgeTree() {
                         }`}
                         title={page.path}
                       >
+                        {page.origin === "web-clip" && <Globe className="h-3 w-3 shrink-0 text-blue-400" />}
                         <span className="truncate">{page.title}</span>
                       </button>
                     )
@@ -226,6 +228,7 @@ function parsePageInfo(path: string, fileName: string, content: string): WikiPag
   let type = "other"
   let title = fileName.replace(".md", "").replace(/-/g, " ")
   const tags: string[] = []
+  let origin: string | undefined
 
   // Parse YAML frontmatter
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
@@ -241,6 +244,9 @@ function parsePageInfo(path: string, fileName: string, content: string): WikiPag
     if (tagsMatch) {
       tags.push(...tagsMatch[1].split(",").map((t) => t.trim().replace(/["']/g, "")))
     }
+
+    const originMatch = fm.match(/^origin:\s*(.+)$/m)
+    if (originMatch) origin = originMatch[1].trim()
   }
 
   // Fallback: try first heading if no frontmatter title
@@ -260,7 +266,7 @@ function parsePageInfo(path: string, fileName: string, content: string): WikiPag
     else if (fileName === "overview.md") type = "overview"
   }
 
-  return { path, title, type, tags }
+  return { path, title, type, tags, origin }
 }
 
 function flattenMdFiles(nodes: FileNode[]): FileNode[] {
