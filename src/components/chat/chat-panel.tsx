@@ -302,6 +302,8 @@ export function ChatPanel() {
         })
 
         lastQueryPages = relevantPages.map((p) => ({ title: p.title, path: p.path }))
+        // Capture for passing to finalizeStream
+        const queryRefs = [...lastQueryPages]
       }
 
       // ── Conversation history with count limit ────────────────
@@ -326,12 +328,12 @@ export function ChatPanel() {
             appendStreamToken(token)
           },
           onDone: () => {
-            finalizeStream(accumulated)
+            finalizeStream(accumulated, queryRefs)
             abortRef.current = null
             checkSaveWorthy(accumulated, text)
           },
           onError: (err) => {
-            finalizeStream(`Error: ${err.message}`)
+            finalizeStream(`Error: ${err.message}`, undefined)
             abortRef.current = null
           },
         },

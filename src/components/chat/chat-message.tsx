@@ -137,7 +137,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
             <MarkdownContent content={message.content} />
           )}
         </div>
-        {isAssistant && <CitedReferencesPanel content={message.content} />}
+        {isAssistant && <CitedReferencesPanel content={message.content} savedReferences={message.references} />}
         {isAssistant && (
           <SaveToWikiButton content={message.content} visible={hovered} />
         )}
@@ -271,12 +271,16 @@ function getRefType(path: string): string {
   return "source"
 }
 
-function CitedReferencesPanel({ content }: { content: string }) {
+function CitedReferencesPanel({ content, savedReferences }: { content: string; savedReferences?: CitedPage[] }) {
   const project = useWikiStore((s) => s.project)
   const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
   const [expanded, setExpanded] = useState(false)
 
-  const citedPages = useMemo(() => extractCitedPages(content), [content])
+  // Use saved references first (persisted with message), fall back to dynamic extraction
+  const citedPages = useMemo(() => {
+    if (savedReferences && savedReferences.length > 0) return savedReferences
+    return extractCitedPages(content)
+  }, [content, savedReferences])
 
   if (citedPages.length === 0) return null
 
