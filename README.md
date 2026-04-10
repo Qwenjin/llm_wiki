@@ -121,19 +121,6 @@ The original mentions `[[wikilinks]]` for cross-references but has no graph anal
 | Adamic-Adar | ×1.5 | Pages sharing common neighbors (weighted by neighbor degree) |
 | Type affinity | ×1.0 | Bonus for same page type (entity↔entity, concept↔concept) |
 
-**Louvain Community Detection:**
-- Automatic knowledge cluster discovery via graphology-communities-louvain
-- Type / Community coloring mode toggle — see pages by type or by discovered topic clusters
-- Per-community cohesion score (intra-edge density), low-cohesion clusters flagged with warning
-- 12-color palette, community legend with top node labels and member counts
-
-**Graph Insights Panel:**
-- Right-side expandable panel showing automatically discovered insights
-- **Surprising connections** — cross-community, cross-type, peripheral↔hub edges scored by composite metric; dismissable
-- **Knowledge gaps** — isolated pages (degree ≤ 1), sparse communities (cohesion < 0.15), bridge nodes (connecting 3+ clusters)
-- Click any insight to highlight corresponding nodes and edges in the graph
-- **Deep Research integration** — knowledge gaps and bridge nodes have a one-click Deep Research button that generates domain-aware search topics via LLM
-
 **Graph Visualization (sigma.js + graphology + ForceAtlas2):**
 - Node colors by page type or community, sizes scaled by link count (√ scaling)
 - Edge thickness and color by relevance weight (green=strong, gray=weak)
@@ -142,7 +129,36 @@ The original mentions `[[wikilinks]]` for cross-references but has no graph anal
 - Position caching prevents layout jumps when data updates
 - Legend switches between type counts and community info based on coloring mode
 
-### 5. Optimized Query Retrieval Pipeline
+### 5. Louvain Community Detection
+
+Not in the original. Automatic discovery of knowledge clusters using the **Louvain algorithm** (graphology-communities-louvain):
+
+- **Auto-clustering** — discovers which pages naturally group together based on link topology, independent of predefined page types
+- **Type / Community toggle** — switch between coloring nodes by page type (entity, concept, source...) or by discovered knowledge cluster
+- **Cohesion scoring** — each community scored by intra-edge density (actual edges / possible edges); low-cohesion clusters (< 0.15) flagged with warning
+- **12-color palette** — distinct visual separation between clusters
+- **Community legend** — shows top node label, member count, and cohesion per cluster
+
+### 6. Graph Insights — Surprising Connections & Knowledge Gaps
+
+Not in the original. The system **automatically analyzes graph structure** to surface actionable insights:
+
+**Surprising Connections:**
+- Detects unexpected relationships: cross-community edges, cross-type links, peripheral↔hub couplings
+- Composite surprise score ranks the most noteworthy connections
+- Dismissable — mark connections as reviewed so they don't reappear
+
+**Knowledge Gaps:**
+- **Isolated pages** (degree ≤ 1) — pages with few or no connections to the rest of the wiki
+- **Sparse communities** (cohesion < 0.15, ≥ 3 pages) — knowledge areas with weak internal cross-references
+- **Bridge nodes** (connecting 3+ clusters) — critical junction pages that hold multiple knowledge areas together
+
+**Interactive:**
+- Click any insight card to **highlight** corresponding nodes and edges in the graph; click again to deselect
+- Knowledge gaps and bridge nodes have a **Deep Research button** — triggers LLM-optimized research with domain-aware topics (reads overview.md + purpose.md for context)
+- Research topic shown in **editable confirmation dialog** before starting — user can refine topic and search queries
+
+### 7. Optimized Query Retrieval Pipeline
 
 The original describes a simple query where the LLM reads relevant pages. We built a **4-phase retrieval pipeline** with budget control:
 
@@ -169,7 +185,7 @@ Phase 4: Context Assembly
   - LLM instructed to cite pages by number: [1], [2], etc.
 ```
 
-### 6. Multi-Conversation Chat with Persistence
+### 8. Multi-Conversation Chat with Persistence
 
 The original has a single query interface. We built **full multi-conversation support**:
 
@@ -182,7 +198,7 @@ The original has a single query interface. We built **full multi-conversation su
 - **Regenerate** — re-generate the last response with one click (removes last assistant + user message pair, re-sends)
 - **Save to Wiki** — archive valuable answers to `wiki/queries/`, then auto-ingest to extract entities/concepts into the knowledge network
 
-### 7. Thinking / Reasoning Display
+### 9. Thinking / Reasoning Display
 
 Not in the original. For LLMs that emit `<think>` blocks (DeepSeek, QwQ, etc.):
 
@@ -190,7 +206,7 @@ Not in the original. For LLMs that emit `<think>` blocks (DeepSeek, QwQ, etc.):
 - **Collapsed by default** — thinking blocks hidden after completion, click to expand
 - **Visual separation** — thinking content shown in distinct style, separate from the main response
 
-### 8. KaTeX Math Rendering
+### 10. KaTeX Math Rendering
 
 Not in the original. Full LaTeX math support across all views:
 
@@ -199,7 +215,7 @@ Not in the original. Full LaTeX math support across all views:
 - **Auto-detection** — bare `\begin{aligned}` and other LaTeX environments automatically wrapped with `$$` delimiters
 - **Unicode fallback** — 100+ symbol mappings (α, ∑, →, ≤, etc.) for simple inline notation outside math blocks
 
-### 9. Review System (Async Human-in-the-Loop)
+### 11. Review System (Async Human-in-the-Loop)
 
 The original suggests staying involved during ingest. We added an **asynchronous review queue**:
 
@@ -208,7 +224,7 @@ The original suggests staying involved during ingest. We added an **asynchronous
 - **Search queries generated at ingest time** — LLM pre-generates optimized web search queries for each review item
 - User handles reviews at their convenience — doesn't block ingest
 
-### 10. Deep Research
+### 12. Deep Research
 
 <p align="center">
   <img src="assets/1-deepresearch.jpg" width="100%" alt="Deep Research">
@@ -226,7 +242,7 @@ Not in the original. When the LLM identifies knowledge gaps:
 - **Task queue** with 3 concurrent tasks
 - **Research Panel** — dedicated sidebar panel with dynamic height, real-time streaming progress
 
-### 11. Browser Extension (Web Clipper)
+### 13. Browser Extension (Web Clipper)
 
 <p align="center">
   <img src="assets/4-chrome_extension_webclipper.jpg" width="100%" alt="Chrome Extension Web Clipper">
@@ -242,7 +258,7 @@ The original mentions Obsidian Web Clipper. We built a **dedicated Chrome Extens
 - **Clip watcher** — polls every 3 seconds for new clips, processes automatically
 - **Offline preview** — shows extracted content even when app is not running
 
-### 12. Multi-format Document Support
+### 14. Multi-format Document Support
 
 The original focuses on text/markdown. We support structured extraction preserving document semantics:
 
@@ -256,7 +272,7 @@ The original focuses on text/markdown. We support structured extraction preservi
 | Video/Audio | Built-in player |
 | Web clips | Readability.js + Turndown.js → clean Markdown |
 
-### 13. File Deletion with Cascade Cleanup
+### 15. File Deletion with Cascade Cleanup
 
 The original has no deletion mechanism. We added **intelligent cascade deletion**:
 
@@ -266,7 +282,7 @@ The original has no deletion mechanism. We added **intelligent cascade deletion*
 - **Index cleanup** — removed pages are purged from index.md
 - **Wikilink cleanup** — dead `[[wikilinks]]` to deleted pages are removed from remaining wiki pages
 
-### 14. Configurable Context Window
+### 16. Configurable Context Window
 
 Not in the original. Users can configure how much context the LLM receives:
 
@@ -274,7 +290,7 @@ Not in the original. Users can configure how much context the LLM receives:
 - **Proportional budget allocation** — larger windows get proportionally more wiki content
 - **60/20/5/15 split** — wiki pages / chat history / index / system prompt
 
-### 15. Cross-Platform Compatibility
+### 17. Cross-Platform Compatibility
 
 The original is platform-agnostic (abstract pattern). We handle concrete cross-platform concerns:
 
@@ -283,7 +299,7 @@ The original is platform-agnostic (abstract pattern). We handle concrete cross-p
 - **Tauri v2** — native desktop on macOS, Windows, Linux
 - **GitHub Actions CI/CD** — automated builds for macOS (ARM + Intel), Windows (.msi), Linux (.deb / .AppImage)
 
-### 16. Other Additions
+### 18. Other Additions
 
 - **i18n** — English + Chinese interface (react-i18next)
 - **Settings persistence** — LLM provider, API key, model, context size, language saved via Tauri Store
