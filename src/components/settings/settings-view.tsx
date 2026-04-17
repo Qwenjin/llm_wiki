@@ -283,11 +283,11 @@ export function SettingsView() {
             )}
           </div>
 
-          {/* Output Language section */}
+          {/* Target Language section */}
           <div className="space-y-4 rounded-lg border p-4">
-            <h3 className="font-semibold">AI Output Language</h3>
+            <h3 className="font-semibold">AI Target Language</h3>
             <p className="text-xs text-muted-foreground">
-              Force all AI-generated content (chat responses, wiki pages, research results, lint reports) to use the selected language.
+              Force all AI-generated content (chat responses, wiki pages, research results, lint reports) to use the selected target language.
               Choose "Auto" to match the user's input or source document language.
             </p>
             <div className="space-y-2">
