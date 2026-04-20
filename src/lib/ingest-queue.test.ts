@@ -25,6 +25,7 @@ import {
   enqueueBatch,
   retryTask,
   cancelTask,
+  cancelAllTasks,
   clearCompletedTasks,
   clearQueueState,
   getQueue,
@@ -168,6 +169,47 @@ describe("ingest-queue — cancel", () => {
 
     expect(getQueue().find((t) => t.sourcePath === "second.md")).toBeUndefined()
     expect(getQueue().find((t) => t.sourcePath === "first.md")).toBeDefined()
+  })
+})
+
+describe("ingest-queue — cancelAllTasks", () => {
+  it("drops all pending and processing tasks but keeps failed ones", async () => {
+    // Block the processing task so it doesn't finish on its own.
+    mockAutoIngest.mockImplementation(() => new Promise(() => {}))
+
+    await enqueueBatch("/project", [
+      { sourcePath: "a.md", folderContext: "" },
+      { sourcePath: "b.md", folderContext: "" },
+      { sourcePath: "c.md", folderContext: "" },
+    ])
+    await flushMicrotasks(2)
+
+    // Manually set one task to "failed" so we can verify it survives.
+    const failedTask = getQueue()[2]
+    ;(failedTask as { status: string }).status = "failed"
+
+    const removed = await cancelAllTasks("/project")
+
+    expect(removed).toBe(2) // a (processing) + b (pending) gone
+    expect(getQueue()).toHaveLength(1)
+    expect(getQueue()[0].sourcePath).toBe("c.md")
+    expect(getQueue()[0].status).toBe("failed")
+  })
+
+  it("returns 0 when the queue is empty", async () => {
+    const removed = await cancelAllTasks("/project")
+    expect(removed).toBe(0)
+    expect(getQueue()).toHaveLength(0)
+  })
+
+  it("is safe to call after it has already cleared the queue", async () => {
+    mockAutoIngest.mockImplementation(() => new Promise(() => {}))
+    await enqueueIngest("/project", "only.md")
+    await flushMicrotasks(2)
+
+    await cancelAllTasks("/project")
+    const secondCall = await cancelAllTasks("/project")
+    expect(secondCall).toBe(0)
   })
 })
 

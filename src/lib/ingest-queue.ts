@@ -187,6 +187,48 @@ export async function clearCompletedTasks(projectPath: string): Promise<void> {
 }
 
 /**
+ * Cancel everything that's not finished: aborts the running task (if any),
+ * cleans up its partial output, and drops every pending + processing item.
+ *
+ * Failed tasks are retained so the user can still see / retry them.
+ * Returns the number of tasks removed from the queue.
+ */
+export async function cancelAllTasks(projectPath: string): Promise<number> {
+  const pp = normalizePath(projectPath)
+
+  // Abort any in-progress LLM call first so it stops burning tokens.
+  if (currentAbortController) {
+    currentAbortController.abort()
+    currentAbortController = null
+  }
+  processing = false
+
+  // Clean up partial files from the task that was processing, if any.
+  if (lastWrittenFiles.length > 0) {
+    const { deleteFile } = await import("@/commands/fs")
+    for (const filePath of lastWrittenFiles) {
+      try {
+        const fullPath = isAbsolutePath(filePath)
+          ? normalizePath(filePath)
+          : `${pp}/${filePath}`
+        await deleteFile(fullPath)
+      } catch {
+        // file may not exist
+      }
+    }
+    lastWrittenFiles = []
+  }
+
+  const before = queue.length
+  queue = queue.filter((t) => t.status === "failed")
+  const removed = before - queue.length
+
+  await saveQueue(pp)
+  console.log(`[Ingest Queue] Cancelled all: ${removed} tasks removed`)
+  return removed
+}
+
+/**
  * Get current queue state.
  */
 export function getQueue(): readonly IngestTask[] {
