@@ -301,6 +301,22 @@ export const LLM_PRESETS: LlmPreset[] = [
     suggestedContextSize: 131072,
   },
   {
+    id: "xiaomi-mimo",
+    label: "小米 MiMo (Xiaomi)",
+    hint: "api.xiaomimimo.com",
+    provider: "custom",
+    baseUrl: "https://api.xiaomimimo.com/v1",
+    apiMode: "chat_completions",
+    // Standard OpenAI-wire endpoint at api.xiaomimimo.com/v1.
+    // Preflight explicitly whitelists `authorization` + `content-type`,
+    // so browser fetch would work too — but all LLM calls still go
+    // through the Tauri HTTP plugin for uniformity. Model list from
+    // hermes-agent (hermes_cli/models.py:247-251).
+    defaultModel: "mimo-v2-pro",
+    suggestedModels: ["mimo-v2-pro", "mimo-v2-omni", "mimo-v2-flash"],
+    suggestedContextSize: 131072,
+  },
+  {
     id: "volcengine-ark",
     label: "火山引擎 Ark (Volcengine)",
     hint: "ark.cn-beijing.volces.com/api/coding/v3",
