@@ -13,6 +13,23 @@ export interface SearchResult {
 const MAX_RESULTS = 20
 const SNIPPET_CONTEXT = 80
 
+// ── Reciprocal Rank Fusion ─────────────────────────────────────────────────
+// Token search and vector search produce two independently-ranked lists.
+// Their absolute scores are incommensurable (token score: 1-400, vector
+// cosine: 0-1), so summing them privileges whichever list happens to use
+// the larger numbers. RRF sidesteps that by fusing on RANK only:
+//
+//     fused(p) = sum over lists L of  1 / (K + rank_L(p))
+//
+// A page that ranks #1 in BOTH lists wins handily. A page that's only in
+// one list still surfaces if it ranks high there, but a page in BOTH a
+// little lower can outrank it — exactly what we want for hybrid retrieval.
+//
+// K=60 is the canonical constant from Cormack et al. (SIGIR 2009), large
+// enough that small rank differences near the top don't dominate but
+// small enough that being deep in either list still falls off quickly.
+const RRF_K = 60
+
 // ── Scoring weights ────────────────────────────────────────────────────────
 // Exact lexical matches dominate everything else. The rationale: when a
 // user types "attention", the page literally named `attention.md` MUST
@@ -176,7 +193,20 @@ export async function searchWiki(
     // no raw sources
   }
 
-  // Vector search: merge semantic results if embedding enabled
+  // ── Build the token-side ranking (still based on the score field
+  // populated by searchFiles above). Snapshot it BEFORE the vector
+  // step, so adding vector-only pages doesn't shift token ranks.
+  const tokenSorted = [...results].sort((a, b) => b.score - a.score)
+  const tokenRank = new Map<string, number>()
+  tokenSorted.forEach((r, i) => {
+    tokenRank.set(normalizePath(r.path), i + 1) // 1-indexed
+  })
+
+  // ── Vector search: collect ranked list of page-ids and materialize
+  //    pages that token search missed. We do NOT add to results' score
+  //    here — that's done in the RRF step below.
+  let vectorRank = new Map<string, number>()
+  let vectorCount = 0
   try {
     const { useWikiStore } = await import("@/stores/wiki-store")
     const embCfg = useWikiStore.getState().embeddingConfig
@@ -186,6 +216,7 @@ export async function searchWiki(
       const { searchByEmbedding } = await import("@/lib/embedding")
       const vectorResults = await searchByEmbedding(pp, query, embCfg, 10)
       const vectorMs = Math.round(performance.now() - t0)
+      vectorCount = vectorResults.length
 
       console.log(
         `[Vector Search] query="${query}" | ${vectorResults.length} results in ${vectorMs}ms | model=${embCfg.model}` +
@@ -194,61 +225,74 @@ export async function searchWiki(
           : "")
       )
 
-      let boosted = 0
+      // Build vectorRank by page_id (slug); searchByEmbedding returns
+      // results pre-sorted by descending similarity.
+      vectorResults.forEach((vr, i) => vectorRank.set(vr.id, i + 1))
+
+      // Materialize any vector-result page that token search didn't
+      // already include — without this, `results` has no entry for
+      // them and they can't surface even with a top vector rank.
+      const knownIds = new Set(results.map((r) => getFileStem(r.path)))
       let added = 0
-      // Normalize existing paths to forward slashes so Windows backslash
-      // paths from the filesystem match the forward-slash paths we
-      // construct for tryPath below.
-      const existingPaths = new Set(results.map((r) => normalizePath(r.path)))
-
       for (const vr of vectorResults) {
-        // Check if already in results. getFileStem handles both / and \
-        // separators so this works on Windows.
-        const existing = results.find((r) => getFileStem(r.path) === vr.id)
-
-        if (existing) {
-          // Boost score of existing result
-          existing.score += vr.score * 5
-          boosted++
-        } else {
-          // Try to find the file and add it
-          const dirs = ["entities", "concepts", "sources", "synthesis", "comparison", "queries"]
-          for (const dir of dirs) {
-            const tryPath = `${pp}/wiki/${dir}/${vr.id}.md`
-            if (existingPaths.has(tryPath)) break
-            try {
-              const content = await readFile(tryPath)
-              const title = extractTitle(content, `${vr.id}.md`)
-              results.push({
-                path: tryPath,
-                title,
-                snippet: buildSnippet(content, query),
-                titleMatch: false,
-                score: vr.score * 5,
-              })
-              existingPaths.add(tryPath)
-              added++
-              break
-            } catch {
-              // not in this directory
-            }
+        if (knownIds.has(vr.id)) continue
+        const dirs = ["entities", "concepts", "sources", "synthesis", "comparison", "queries"]
+        for (const dir of dirs) {
+          const tryPath = `${pp}/wiki/${dir}/${vr.id}.md`
+          try {
+            const content = await readFile(tryPath)
+            const title = extractTitle(content, `${vr.id}.md`)
+            results.push({
+              path: tryPath,
+              title,
+              snippet: buildSnippet(content, query),
+              titleMatch: false,
+              score: 0, // overwritten by RRF below
+            })
+            knownIds.add(vr.id)
+            added++
+            break
+          } catch {
+            // not in this directory
           }
         }
       }
-
-      if (boosted > 0 || added > 0) {
-        console.log(`[Vector Search] Merged: ${boosted} boosted, ${added} new pages added`)
+      if (added > 0) {
+        console.log(`[Vector Search] Added ${added} vector-only pages to candidate set`)
       }
     }
   } catch (err) {
     console.log(`[Vector Search] Skipped: ${err instanceof Error ? err.message : "not available"}`)
+    vectorRank = new Map()
   }
 
-  // Sort by score descending
-  results.sort((a, b) => b.score - a.score)
+  // ── RRF fusion: replace each result's score with
+  //   1/(K + token_rank) + 1/(K + vector_rank)
+  //
+  // Pages absent from either list contribute 0 from that side.
+  // Pages absent from BOTH never make it here (we only iterate the
+  // results array, which already contains every candidate).
+  for (const r of results) {
+    const tRank = tokenRank.get(normalizePath(r.path))
+    const vRank = vectorRank.get(getFileStem(r.path))
+    let rrf = 0
+    if (tRank !== undefined) rrf += 1 / (RRF_K + tRank)
+    if (vRank !== undefined) rrf += 1 / (RRF_K + vRank)
+    r.score = rrf
+  }
 
-  const tokenCount = results.filter((r) => r.score > 0).length
-  console.log(`[Search] query="${query}" | ${tokenCount} token matches | ${results.length} total results`)
+  // Sort by RRF score descending. Ties (e.g. two pages both at vector
+  // rank 1 but neither in token list) are broken by alphabetical path
+  // order so output is deterministic for tests.
+  results.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score
+    return a.path.localeCompare(b.path)
+  })
+
+  const tokenHits = tokenRank.size
+  console.log(
+    `[Search] query="${query}" | RRF fused: ${tokenHits} token + ${vectorCount} vector → ${results.length} unique`,
+  )
 
   return results.slice(0, MAX_RESULTS)
 }
